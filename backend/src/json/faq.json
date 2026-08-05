@@ -1,0 +1,17 @@
+[
+  {
+    "category": "General",
+    "question": "What is the Badlit Translator?",
+    "answer": "It is a teaching tool that helps convert modern Bisaya phrases into the precolonial Badlit script with built-in history notes."
+  },
+  {
+    "category": "Usage",
+    "question": "Do I need an account to translate?",
+    "answer": "Browsing the dictionary is open to everyone, but you need to sign in to save translations, sync history, and unlock achievements."
+  },
+  {
+    "category": "Technical",
+    "question": "Which browsers are supported?",
+    "answer": "The current build is tested on the latest versions of Chrome, Edge, and Firefox on desktop. Mobile browsers work, but admin pages are optimized for large screens."
+  }
+]

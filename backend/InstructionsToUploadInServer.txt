@@ -1,0 +1,32 @@
+To run the server you need to have node.js
+In the cmd, type
+npm install
+npm run dev 
+
+To install in HEROKU:
+
+heroku login
+
+git init
+git add -A
+git status
+git commit -m "Initial Commit"
+
+heroku create badlit-server
+
+D:\Badlit-Backend\backend>heroku create badlit-server
+Creating ⬢ badlit-server... done
+https://badlit-server-52f5b200c075.herokuapp.com/ | https://git.heroku.com/badlit-server.git
+
+git push heroku master
+
+
+To check the status of the server:
+heroku logs --tail --app badlit-server
+
+
+-- update
+git add -A
+git status
+git commit -m "Update files"
+git push heroku master
