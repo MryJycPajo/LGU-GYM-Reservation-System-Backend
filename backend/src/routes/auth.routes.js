@@ -275,4 +275,45 @@ router.put('/decline/:id', async (req, res) => {
 
 });
 
+// GET CLIENT ACCOUNTS FOR PERSONNEL
+router.get('/clients', async (req, res) => {
+
+    try {
+
+        const [clients] = await db.query(`
+            SELECT
+                a.account_id,
+                a.status,
+                c.firstname,
+                c.lastname,
+                c.email,
+                c.phone_number,
+                c.address
+            FROM accounts a
+            INNER JOIN clients c
+                ON a.account_id = c.account_id
+            WHERE a.account_type = 'Client'
+            ORDER BY c.lastname ASC
+        `);
+
+
+        res.json({
+            success: true,
+            clients
+        });
+
+
+    } catch(err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success:false,
+            message:err.message
+        });
+
+    }
+
+});
+
 module.exports = router;
