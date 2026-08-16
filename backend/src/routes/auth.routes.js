@@ -29,20 +29,30 @@ console.log("PASSWORD:", password);
       });
     }
 
-    // PERSONNEL
-    const [personnel] = await db.query(
-      'SELECT * FROM personnel WHERE username = ? AND password = ?',
-      [username, password]
-    );
+// PERSONNEL
+const [personnel] = await db.query(
+  'SELECT * FROM personnel WHERE username = ? AND password = ?',
+  [username, password]
+);
 
-    if (personnel.length > 0) {
-      return res.json({
-        success: true,
-        role: 'personnel',
-        status: personnel[0].status,
-        user: personnel[0]
-      });
-    }
+if (personnel.length > 0) {
+
+  if (personnel[0].status !== 'Approved') {
+    return res.json({
+      success: false,
+      message: personnel[0].status === 'Pending'
+        ? 'Your personnel account is still waiting for admin approval.'
+        : 'Your personnel account has been declined.'
+    });
+  }
+
+  return res.json({
+    success: true,
+    role: 'personnel',
+    status: personnel[0].status,
+    user: personnel[0]
+  });
+}
 
 // CLIENT
 const [clients] = await db.query(

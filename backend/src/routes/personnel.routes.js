@@ -122,4 +122,39 @@ router.put('/decline/:account_id', async (req, res) => {
 
 });
 
+router.get('/pending', async (req, res) => {
+
+    try {
+
+        const [rows] = await db.query(
+            `SELECT
+                account_id,
+                lastname,
+                firstname,
+                middlename,
+                position,
+                status
+             FROM personnel
+             WHERE status = 'Pending'
+             ORDER BY personnel_id DESC`
+        );
+
+        res.json({
+            success: true,
+            accounts: rows
+        });
+
+    } catch (err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+
+    }
+
+});
+
 module.exports = router;
