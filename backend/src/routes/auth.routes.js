@@ -326,4 +326,228 @@ router.get('/clients', async (req, res) => {
 
 });
 
+// CHANGE CLIENT PASSWORD
+router.put('/change-password', async (req, res) => {
+
+    const {
+        account_id,
+        current_password,
+        new_password
+    } = req.body;
+
+    if (!account_id || !current_password || !new_password) {
+        return res.status(400).json({
+            success: false,
+            message: 'All fields are required.'
+        });
+    }
+
+    try {
+
+        // Check current password
+        const [clients] = await db.query(
+            `SELECT *
+             FROM clients
+             WHERE account_id = ?
+             AND password = ?`,
+            [account_id, current_password]
+        );
+
+        if (clients.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Current password is incorrect.'
+            });
+        }
+
+        // Update password in clients table
+        await db.query(
+            `UPDATE clients
+             SET password = ?
+             WHERE account_id = ?`,
+            [new_password, account_id]
+        );
+
+        // Update password in accounts table
+        await db.query(
+            `UPDATE accounts
+             SET password = ?
+             WHERE account_id = ?`,
+            [new_password, account_id]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Password changed successfully.'
+        });
+
+    } catch (err) {
+
+        console.error('Change password error:', err);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Server error while changing password.'
+        });
+
+    }
+
+});
+
+// GET SPECIFIC CLIENT PROFILE
+router.get('/clients/:account_id', async (req, res) => {
+
+    const { account_id } = req.params;
+
+    try {
+
+        const [clients] = await db.query(
+            `SELECT
+                account_id,
+                status,
+                firstname,
+                middlename,
+                lastname,
+                birthdate,
+                gender,
+                email,
+                phone_number,
+                address,
+                username
+             FROM clients
+             WHERE account_id = ?`,
+            [account_id]
+        );
+
+        if (clients.length === 0) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'Client profile not found.'
+            });
+
+        }
+
+        return res.json({
+            success: true,
+            client: clients[0]
+        });
+
+    } catch (err) {
+
+        console.error('Get client profile error:', err);
+
+        return res.status(500).json({
+            success: false,
+            message: 'Server error while loading client profile.'
+        });
+
+    }
+
+});
+
+// UPDATE CLIENT PROFILE
+router.put('/clients/:account_id', async (req, res) => {
+
+    const { account_id } = req.params;
+
+    const {
+        lastname,
+        firstname,
+        middlename,
+        birthdate,
+        gender,
+        address,
+        email,
+        phone_number,
+        username
+    } = req.body;
+
+    // CHECK REQUIRED FIELDS
+    if (
+        !lastname ||
+        !firstname ||
+        !birthdate ||
+        !gender ||
+        !address ||
+        !email ||
+        !phone_number ||
+        !username
+    ) {
+
+        return res.status(400).json({
+            success: false,
+            message: 'Please fill in all required fields.'
+        });
+
+    }
+
+    try {
+
+        // CHECK IF CLIENT EXISTS
+        const [clients] = await db.query(
+            `SELECT *
+             FROM clients
+             WHERE account_id = ?`,
+            [account_id]
+        );
+
+        if (clients.length === 0) {
+
+            return res.status(404).json({
+                success: false,
+                message: 'Client profile not found.'
+            });
+
+        }
+
+        // UPDATE CLIENT PROFILE
+        await db.query(
+            `UPDATE clients
+             SET
+                lastname = ?,
+                firstname = ?,
+                middlename = ?,
+                birthdate = ?,
+                gender = ?,
+                address = ?,
+                email = ?,
+                phone_number = ?,
+                username = ?
+             WHERE account_id = ?`,
+            [
+                lastname,
+                firstname,
+                middlename || null,
+                birthdate,
+                gender,
+                address,
+                email,
+                phone_number,
+                username,
+                account_id
+            ]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Profile updated successfully.'
+        });
+
+    } catch (err) {
+
+        console.error(
+            'Update client profile error:',
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: 'Server error while updating profile.'
+        });
+
+    }
+
+});
+
 module.exports = router;
