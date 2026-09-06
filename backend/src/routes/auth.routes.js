@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const mailer = require('../utils/mailer');
 
 // LOGIN
 router.post('/login', async (req, res) => {
@@ -219,26 +220,123 @@ router.put('/approve/:id', async (req, res) => {
 
     try {
 
+        // Check what type of account this is
+        const [accounts] = await db.query(
+            `SELECT account_type
+             FROM accounts
+             WHERE account_id = ?`,
+            [id]
+        );
+
+        if (accounts.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Account not found.'
+            });
+        }
+
+        const accountType = accounts[0].account_type;
+
+        // APPROVE ACCOUNT
         await db.query(
             "UPDATE accounts SET status='Approved' WHERE account_id=?",
             [id]
         );
 
-        await db.query(
-            "UPDATE clients SET status='Active' WHERE account_id=?",
-            [id]
-        );
+        // CLIENT
+        if (accountType === 'Client') {
 
-        await db.query(
-            "UPDATE personnel SET status='Approved' WHERE account_id=?",
-            [id]
-        );
+            await db.query(
+                "UPDATE clients SET status='Active' WHERE account_id=?",
+                [id]
+            );
+
+            // Get client information
+            const [clients] = await db.query(
+                `SELECT firstname, email
+                 FROM clients
+                 WHERE account_id = ?`,
+                [id]
+            );
+
+            if (clients.length > 0 && clients[0].email) {
+
+                const firstname = clients[0].firstname;
+                const email = clients[0].email;
+
+                // Change Password page
+const changePasswordLink =
+    `http://localhost:5173/src/pages/change-password.html?account_id=${id}`;
+
+                // Send approval email
+                await mailer.sendMail({
+                    from: `"LGU Gym Reservation System" <${process.env.MAIL_USER}>`,
+                    to: email,
+                    subject: 'LGU Gym Reservation - Account Approved',
+                    html: `
+                        <h2>Account Approved!</h2>
+
+                        <p>Hello ${firstname},</p>
+
+                        <p>
+                            Your LGU Gym Reservation System account
+                            has been approved by the administrator.
+                        </p>
+
+                        <p>
+                            <strong>Status: Approved</strong>
+                        </p>
+
+                        <p>
+                            Please click the button below to set your
+                            new password:
+                        </p>
+
+                        <p>
+                            <a href="${changePasswordLink}"
+                               style="
+                               display:inline-block;
+                               padding:12px 20px;
+                               background:#087348;
+                               color:white;
+                               text-decoration:none;
+                               border-radius:6px;
+                               ">
+                               Change Password
+                            </a>
+                        </p>
+
+                        <p>
+                            After setting your new password,
+                            you may log in to the system.
+                        </p>
+
+                        <p>
+                            Thank you!<br>
+                            LGU Gym Reservation System
+                        </p>
+                    `
+                });
+            }
+        }
+
+        // PERSONNEL
+        if (accountType === 'Personnel') {
+
+            await db.query(
+                "UPDATE personnel SET status='Approved' WHERE account_id=?",
+                [id]
+            );
+        }
 
         res.json({
-            success: true
+            success: true,
+            message: 'Account approved successfully.'
         });
 
     } catch (err) {
+
+        console.error('Approve account error:', err);
 
         res.status(500).json({
             success: false,
@@ -388,6 +486,92 @@ router.put('/change-password', async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Server error while changing password.'
+        });
+
+    }
+
+});
+
+// =====================================
+// FIRST-TIME CLIENT PASSWORD SETUP
+// =====================================
+
+router.put('/set-password', async (req, res) => {
+
+    const {
+        account_id,
+        new_password
+    } = req.body;
+
+    if (!account_id || !new_password) {
+        return res.status(400).json({
+            success: false,
+            message: 'New password is required.'
+        });
+    }
+
+    if (new_password.length < 6) {
+        return res.status(400).json({
+            success: false,
+            message: 'Password must be at least 6 characters.'
+        });
+    }
+
+    try {
+
+        // Check if client exists and is approved
+        const [clients] = await db.query(
+            `SELECT account_id, status
+             FROM clients
+             WHERE account_id = ?`,
+            [account_id]
+        );
+
+        if (clients.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Client account not found.'
+            });
+        }
+
+        if (clients[0].status !== 'Active') {
+            return res.status(403).json({
+                success: false,
+                message: 'This client account is not approved.'
+            });
+        }
+
+        // Update client password
+        await db.query(
+            `UPDATE clients
+             SET password = ?
+             WHERE account_id = ?`,
+            [new_password, account_id]
+        );
+
+        // Update account password
+        await db.query(
+            `UPDATE accounts
+             SET password = ?
+             WHERE account_id = ?`,
+            [new_password, account_id]
+        );
+
+        return res.json({
+            success: true,
+            message: 'Password set successfully.'
+        });
+
+    } catch (err) {
+
+        console.error(
+            'Set password error:',
+            err
+        );
+
+        return res.status(500).json({
+            success: false,
+            message: 'Server error while setting password.'
         });
 
     }

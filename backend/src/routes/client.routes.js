@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const mailer = require('../utils/mailer');
 
 
 // PERSONNEL CREATE CLIENT ACCOUNT
@@ -81,6 +82,22 @@ await db.query(
         'Inactive'
     ]
 );
+        // Send pending approval email
+        await mailer.sendMail({
+            from: `"LGU Gym Reservation System" <${process.env.MAIL_USER}>`,
+            to: email,
+            subject: 'LGU Gym Reservation - Account Pending Approval',
+            html: `
+                <h2>Account Registration Successful</h2>
+                <p>Hello ${firstname},</p>
+                <p>Your LGU Gym Reservation System account has been successfully registered.</p>
+                <p><strong>Status: Pending Approval</strong></p>
+                <p>Please wait for the administrator to approve your account.</p>
+                <p>You will receive another email once your account has been approved.</p>
+                <p>Thank you!</p>
+                <p>LGU Gym Reservation System</p>
+            `
+        });
 
         res.json({
             success: true,
