@@ -11,8 +11,11 @@ router.post('/', async (req, res) => {
     const {
         account_id,
         service,
+        purpose,
         reservation_date,
         reservation_time,
+        end_time,
+        participants,
         reservation_details
     } = req.body;
 
@@ -22,11 +25,22 @@ router.post('/', async (req, res) => {
             !account_id ||
             !service ||
             !reservation_date ||
-            !reservation_time
+            !reservation_time ||
+            !end_time
         ) {
             return res.status(400).json({
                 success: false,
                 message: 'Please complete all required fields.'
+            });
+        }
+
+        if (
+            participants !== undefined &&
+            (!Number.isFinite(Number(participants)) || Number(participants) <= 0)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Participants must be a positive number.'
             });
         }
 
@@ -36,19 +50,25 @@ router.post('/', async (req, res) => {
             (
                 account_id,
                 service,
+                purpose,
                 reservation_date,
                 reservation_time,
+                end_time,
+                participants,
                 reservation_details,
                 status,
                 payment_status
             )
-            VALUES (?, ?, ?, ?, ?, 'Pending', 'Unpaid')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 'Unpaid')
             `,
             [
                 account_id,
                 service,
+                purpose || null,
                 reservation_date,
                 reservation_time,
+                end_time,
+                participants === undefined ? null : Number(participants),
                 reservation_details || null
             ]
         );
@@ -82,14 +102,19 @@ router.get('/', async (req, res) => {
 
     try {
 
+        const historyOnly = req.query.history === 'true';
+
         const [reservations] = await db.query(
             `
             SELECT
                 r.reservation_id,
                 r.account_id,
                 r.service,
+                r.purpose,
                 r.reservation_date,
                 r.reservation_time,
+                r.end_time,
+                r.participants,
                 r.reservation_details,
 r.status,
 r.payment_status,
@@ -108,10 +133,16 @@ r.created_at,
             LEFT JOIN clients c
                 ON r.account_id = c.account_id
 
+            WHERE
+                ? = 0
+                OR r.status IN ('Approved', 'Declined', 'Completed')
+                OR r.reservation_date < CURDATE()
+
             ORDER BY
                 r.reservation_date DESC,
                 r.reservation_time DESC
-            `
+            `,
+            [historyOnly ? 1 : 0]
         );
 
         res.json({
@@ -148,8 +179,11 @@ router.get('/:account_id', async (req, res) => {
                 reservation_id,
                 account_id,
                 service,
+                purpose,
                 reservation_date,
                 reservation_time,
+                end_time,
+                participants,
                 reservation_details,
                 status,
                 payment_status,

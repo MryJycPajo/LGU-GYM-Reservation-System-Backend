@@ -1,11 +1,23 @@
 const express = require('express');
+const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const db = require('../config/db');
 const mailer = require('../utils/mailer');
 
 
 // PERSONNEL CREATE CLIENT ACCOUNT
-router.post('/register', async (req, res) => {
+router.post('/register',
+    body('email').trim().isEmail().withMessage('Please provide a valid email address.'),
+    async (req, res) => {
+
+const validationErrors = validationResult(req);
+
+if (!validationErrors.isEmpty()) {
+    return res.status(400).json({
+        success: false,
+        message: validationErrors.array()[0].msg
+    });
+}
 
 const {
     lastname,
