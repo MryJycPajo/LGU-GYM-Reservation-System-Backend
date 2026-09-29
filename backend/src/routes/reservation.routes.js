@@ -2,6 +2,11 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 
+const WHOLE_DAY_START_TIME = '08:00:00';
+const WHOLE_DAY_END_TIME = '22:00:00';
+const DATE_ALREADY_RESERVED_MESSAGE =
+    'Sorry, this date is already reserved. Please select another available date.';
+
 // =====================================
 // CREATE RESERVATION
 // =====================================
@@ -13,20 +18,19 @@ router.post('/', async (req, res) => {
         service,
         purpose,
         reservation_date,
-        reservation_time,
-        end_time,
         participants,
         reservation_details
     } = req.body;
+
+    let connection;
+    let dateLockAcquired = false;
 
     try {
 
         if (
             !account_id ||
             !service ||
-            !reservation_date ||
-            !reservation_time ||
-            !end_time
+            !reservation_date
         ) {
             return res.status(400).json({
                 success: false,
@@ -44,7 +48,45 @@ router.post('/', async (req, res) => {
             });
         }
 
-        const [result] = await db.query(
+        // Reservation time is fixed for the LGU Gymnasium; client-supplied
+        // reservation_time/end_time values are intentionally ignored.
+        connection = await db.getConnection();
+
+        // Serialize creates for a particular date so parallel requests cannot
+        // both pass the availability check before either one is inserted.
+        const [lockResult] = await connection.query(
+            'SELECT GET_LOCK(?, 5) AS acquired',
+            [`lgu_gym_reservation_date:${reservation_date}`]
+        );
+
+        dateLockAcquired = lockResult[0].acquired === 1;
+
+        if (!dateLockAcquired) {
+            return res.status(409).json({
+                success: false,
+                message: DATE_ALREADY_RESERVED_MESSAGE
+            });
+        }
+
+        const [existingReservations] = await connection.query(
+            `
+            SELECT reservation_id
+            FROM reservations
+            WHERE reservation_date = ?
+              AND status IN ('Pending', 'Approved', 'Completed')
+            LIMIT 1
+            `,
+            [reservation_date]
+        );
+
+        if (existingReservations.length > 0) {
+            return res.status(409).json({
+                success: false,
+                message: DATE_ALREADY_RESERVED_MESSAGE
+            });
+        }
+
+        const [result] = await connection.query(
             `
             INSERT INTO reservations
             (
@@ -66,8 +108,8 @@ router.post('/', async (req, res) => {
                 service,
                 purpose || null,
                 reservation_date,
-                reservation_time,
-                end_time,
+                WHOLE_DAY_START_TIME,
+                WHOLE_DAY_END_TIME,
                 participants === undefined ? null : Number(participants),
                 reservation_details || null
             ]
@@ -90,6 +132,21 @@ router.post('/', async (req, res) => {
             success: false,
             message: error.message
         });
+    } finally {
+        if (connection) {
+            if (dateLockAcquired) {
+                try {
+                    await connection.query(
+                        'SELECT RELEASE_LOCK(?)',
+                        [`lgu_gym_reservation_date:${reservation_date}`]
+                    );
+                } catch (releaseError) {
+                    console.error('Reservation date lock release error:', releaseError);
+                }
+            }
+
+            connection.release();
+        }
     }
 });
 
