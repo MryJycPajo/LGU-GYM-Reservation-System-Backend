@@ -354,6 +354,14 @@ router.put('/:reservation_id/payment', async (req, res) => {
         });
     }
 
+    // Paid status must be accompanied by an auditable transaction record.
+    if (payment_status === 'Paid') {
+        return res.status(409).json({
+            success: false,
+            message: 'Record a payment transaction to mark this reservation as paid.'
+        });
+    }
+
     try {
 const [result] = await db.query(
     `

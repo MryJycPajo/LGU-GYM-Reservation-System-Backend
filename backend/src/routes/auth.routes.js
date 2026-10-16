@@ -2,6 +2,16 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 const mailer = require('../utils/mailer');
+const jwt = require('jsonwebtoken');
+
+function createLoginToken(role, user) {
+  const accountId = user.account_id ?? user.admin_id ?? user.id;
+  return jwt.sign(
+    { role, account_id: accountId },
+    process.env.JWT_SECRET || 'secret',
+    { expiresIn: '12h' }
+  );
+}
 
 // LOGIN
 router.post('/login', async (req, res) => {
@@ -26,7 +36,8 @@ console.log("PASSWORD:", password);
       return res.json({
         success: true,
         role: 'admin',
-        user: admins[0]
+        user: admins[0],
+        token: createLoginToken('admin', admins[0])
       });
     }
 
@@ -51,7 +62,8 @@ if (personnel.length > 0) {
     success: true,
     role: 'personnel',
     status: personnel[0].status,
-    user: personnel[0]
+    user: personnel[0],
+    token: createLoginToken('personnel', personnel[0])
   });
 }
 
@@ -75,7 +87,8 @@ if (clients.length > 0) {
     return res.json({
         success: true,
         role: 'client',
-        user: clients[0]
+        user: clients[0],
+        token: createLoginToken('client', clients[0])
     });
 }
 
