@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const bcrypt = require('bcryptjs');
+const adminAuth = require('../middleware/adminAuth');
+const { notifyPendingRegistration, decideAccount } = require('../services/accountWorkflow');
 
 router.post('/register', async (req, res) => {
 
@@ -20,6 +23,8 @@ router.post('/register', async (req, res) => {
 
     try {
 
+        const passwordHash = await bcrypt.hash(password, 10);
+
         const account_id =
             Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -30,7 +35,7 @@ router.post('/register', async (req, res) => {
             [
                 account_id,
                 username,
-                password
+                passwordHash
             ]
         );
 
@@ -64,9 +69,11 @@ router.post('/register', async (req, res) => {
                 email,
                 position,
                 username,
-                password
+                passwordHash
             ]
         );
+
+        await notifyPendingRegistration(email, firstname);
 
         res.json({
             success: true,
@@ -86,43 +93,39 @@ router.post('/register', async (req, res) => {
 
 });
 
-router.put('/approve/:account_id', async (req, res) => {
+router.put('/approve/:account_id', adminAuth, async (req, res) => {
 
     const { account_id } = req.params;
 
-    await db.query(
-        "UPDATE personnel SET status='Approved' WHERE account_id=?",
-        [account_id]
-    );
-
-    await db.query(
-        "UPDATE accounts SET status='Approved' WHERE account_id=?",
-        [account_id]
-    );
-
-    res.json({ success: true });
+    try {
+        const result = await decideAccount(account_id, 'Approved');
+        if (result.outcome === 'not_found') return res.status(404).json({ success: false, message: 'Account not found.' });
+        if (result.outcome === 'not_pending') return res.status(409).json({ success: false, message: 'Account is no longer pending.' });
+        if (result.outcome !== 'updated') return res.status(400).json({ success: false, message: 'Unsupported account type.' });
+        res.json({ success: true });
+    } catch (_) {
+        res.status(500).json({ success: false, message: 'Server error while updating account.' });
+    }
 
 });
 
-router.put('/decline/:account_id', async (req, res) => {
+router.put('/decline/:account_id', adminAuth, async (req, res) => {
 
     const { account_id } = req.params;
 
-    await db.query(
-        "UPDATE personnel SET status='Declined' WHERE account_id=?",
-        [account_id]
-    );
-
-    await db.query(
-        "UPDATE accounts SET status='Declined' WHERE account_id=?",
-        [account_id]
-    );
-
-    res.json({ success: true });
+    try {
+        const result = await decideAccount(account_id, 'Declined');
+        if (result.outcome === 'not_found') return res.status(404).json({ success: false, message: 'Account not found.' });
+        if (result.outcome === 'not_pending') return res.status(409).json({ success: false, message: 'Account is no longer pending.' });
+        if (result.outcome !== 'updated') return res.status(400).json({ success: false, message: 'Unsupported account type.' });
+        res.json({ success: true });
+    } catch (_) {
+        res.status(500).json({ success: false, message: 'Server error while updating account.' });
+    }
 
 });
 
-router.get('/pending', async (req, res) => {
+router.get('/pending', adminAuth, async (req, res) => {
 
     try {
 
@@ -287,7 +290,10 @@ router.put('/change-password/:account_id', async (req, res) => {
 
 
         // Check current password
-        if (currentPassword !== currentDatabasePassword) {
+        const passwordMatches = /^\$2[aby]\$/.test(currentDatabasePassword)
+            ? await bcrypt.compare(currentPassword, currentDatabasePassword)
+            : currentPassword === currentDatabasePassword;
+        if (!passwordMatches) {
 
             return res.status(400).json({
                 success: false,
@@ -297,6 +303,8 @@ router.put('/change-password/:account_id', async (req, res) => {
         }
 
 
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+
         // Update password
         await db.query(
             `
@@ -305,7 +313,7 @@ router.put('/change-password/:account_id', async (req, res) => {
             WHERE account_id = ?
             `,
             [
-                newPassword,
+                passwordHash,
                 account_id
             ]
         );
@@ -319,7 +327,7 @@ router.put('/change-password/:account_id', async (req, res) => {
             WHERE account_id = ?
             `,
             [
-                newPassword,
+                passwordHash,
                 account_id
             ]
         );

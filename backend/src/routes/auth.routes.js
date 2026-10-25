@@ -1,8 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
-const mailer = require('../utils/mailer');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const adminAuth = require('../middleware/adminAuth');
+const { decideAccount } = require('../services/accountWorkflow');
+const { passwordMatches, verifyAndMigratePassword } = require('../services/passwordSecurity');
 
 function createLoginToken(role, user) {
   const accountId = user.account_id ?? user.admin_id ?? user.id;
@@ -16,38 +19,32 @@ function createLoginToken(role, user) {
 // LOGIN
 router.post('/login', async (req, res) => {
 
-  console.log("Login Request:", req.body);
-
   const { username, password } = req.body;
-
-  console.log("BODY:", req.body);
-console.log("USERNAME:", username);
-console.log("PASSWORD:", password);
 
   try {
 
     // ADMIN
     const [admins] = await db.query(
-      'SELECT * FROM admins WHERE username = ? AND password = ?',
-      [username, password]
+      'SELECT * FROM admins WHERE username = ?',
+      [username]
     );
 
-    if (admins.length > 0) {
+    if (admins.length > 0 && (await verifyAndMigratePassword({ db, role: 'admin', user: admins[0], input: password })).matches) {
       return res.json({
         success: true,
         role: 'admin',
-        user: admins[0],
+        user: (({ password: _password, ...safeAdmin }) => safeAdmin)(admins[0]),
         token: createLoginToken('admin', admins[0])
       });
     }
 
 // PERSONNEL
 const [personnel] = await db.query(
-  'SELECT * FROM personnel WHERE username = ? AND password = ?',
-  [username, password]
+  'SELECT * FROM personnel WHERE username = ?',
+  [username]
 );
 
-if (personnel.length > 0) {
+if (personnel.length > 0 && (await verifyAndMigratePassword({ db, role: 'personnel', user: personnel[0], input: password })).matches) {
 
   if (personnel[0].status !== 'Approved') {
     return res.json({
@@ -62,20 +59,18 @@ if (personnel.length > 0) {
     success: true,
     role: 'personnel',
     status: personnel[0].status,
-    user: personnel[0],
+    user: (({ password: _password, ...safePersonnel }) => safePersonnel)(personnel[0]),
     token: createLoginToken('personnel', personnel[0])
   });
 }
 
 // CLIENT
 const [clients] = await db.query(
-    `SELECT * FROM clients
-     WHERE username = ?
-     AND password = ?`,
-    [username, password]
+    `SELECT * FROM clients WHERE username = ?`,
+    [username]
 );
 
-if (clients.length > 0) {
+if (clients.length > 0 && (await verifyAndMigratePassword({ db, role: 'client', user: clients[0], input: password })).matches) {
 
     if (clients[0].status !== 'Active') {
         return res.json({
@@ -87,7 +82,7 @@ if (clients.length > 0) {
     return res.json({
         success: true,
         role: 'client',
-        user: clients[0],
+        user: (({ password: _password, ...safeClient }) => safeClient)(clients[0]),
         token: createLoginToken('client', clients[0])
     });
 }
@@ -111,7 +106,7 @@ if (clients.length > 0) {
 });
 
 // GET ALL PENDING CLIENT ACCOUNTS
-router.get('/pending-clients', async (req, res) => {
+router.get('/pending-clients', adminAuth, async (req, res) => {
 
     try {
 
@@ -148,7 +143,7 @@ router.get('/pending-clients', async (req, res) => {
 });
 
 // ADMIN DASHBOARD COUNTS
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', adminAuth, async (req, res) => {
 
     try {
 
@@ -190,23 +185,25 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // GET ALL USER ACCOUNTS
-router.get('/accounts', async (req, res) => {
+router.get('/accounts', adminAuth, async (req, res) => {
     try {
 
         const [rows] = await db.query(`
             SELECT
                 a.account_id,
+                a.username,
                 a.account_type,
+                a.account_type AS role,
                 a.status,
                 COALESCE(c.firstname, p.firstname) AS firstname,
                 COALESCE(c.lastname, p.lastname) AS lastname,
-                COALESCE(c.email, p.email) AS email,
-                p.position
+                COALESCE(c.email, p.email) AS email
             FROM accounts a
             LEFT JOIN clients c
                 ON a.account_id = c.account_id
             LEFT JOIN personnel p
                 ON a.account_id = p.account_id
+            WHERE a.account_type IN ('Client', 'Personnel')
             ORDER BY a.account_type, lastname
         `);
 
@@ -227,120 +224,16 @@ router.get('/accounts', async (req, res) => {
     }
 });
 
-router.put('/approve/:id', async (req, res) => {
+router.put('/approve/:id', adminAuth, async (req, res) => {
 
     const { id } = req.params;
 
     try {
 
-        // Check what type of account this is
-        const [accounts] = await db.query(
-            `SELECT account_type
-             FROM accounts
-             WHERE account_id = ?`,
-            [id]
-        );
-
-        if (accounts.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Account not found.'
-            });
-        }
-
-        const accountType = accounts[0].account_type;
-
-        // APPROVE ACCOUNT
-        await db.query(
-            "UPDATE accounts SET status='Approved' WHERE account_id=?",
-            [id]
-        );
-
-        // CLIENT
-        if (accountType === 'Client') {
-
-            await db.query(
-                "UPDATE clients SET status='Active' WHERE account_id=?",
-                [id]
-            );
-
-            // Get client information
-            const [clients] = await db.query(
-                `SELECT firstname, email
-                 FROM clients
-                 WHERE account_id = ?`,
-                [id]
-            );
-
-            if (clients.length > 0 && clients[0].email) {
-
-                const firstname = clients[0].firstname;
-                const email = clients[0].email;
-
-                // Change Password page
-const changePasswordLink =
-    `http://localhost:5173/src/pages/change-password.html?account_id=${id}`;
-
-                // Send approval email
-                await mailer.sendMail({
-                    from: `"LGU Gym Reservation System" <${process.env.MAIL_USER}>`,
-                    to: email,
-                    subject: 'LGU Gym Reservation - Account Approved',
-                    html: `
-                        <h2>Account Approved!</h2>
-
-                        <p>Hello ${firstname},</p>
-
-                        <p>
-                            Your LGU Gym Reservation System account
-                            has been approved by the administrator.
-                        </p>
-
-                        <p>
-                            <strong>Status: Approved</strong>
-                        </p>
-
-                        <p>
-                            Please click the button below to set your
-                            new password:
-                        </p>
-
-                        <p>
-                            <a href="${changePasswordLink}"
-                               style="
-                               display:inline-block;
-                               padding:12px 20px;
-                               background:#087348;
-                               color:white;
-                               text-decoration:none;
-                               border-radius:6px;
-                               ">
-                               Change Password
-                            </a>
-                        </p>
-
-                        <p>
-                            After setting your new password,
-                            you may log in to the system.
-                        </p>
-
-                        <p>
-                            Thank you!<br>
-                            LGU Gym Reservation System
-                        </p>
-                    `
-                });
-            }
-        }
-
-        // PERSONNEL
-        if (accountType === 'Personnel') {
-
-            await db.query(
-                "UPDATE personnel SET status='Approved' WHERE account_id=?",
-                [id]
-            );
-        }
+        const result = await decideAccount(id, 'Approved');
+        if (result.outcome === 'not_found') return res.status(404).json({ success: false, message: 'Account not found.' });
+        if (result.outcome === 'not_pending') return res.status(409).json({ success: false, message: 'Account is no longer pending.' });
+        if (result.outcome !== 'updated') return res.status(400).json({ success: false, message: 'Unsupported account type.' });
 
         res.json({
             success: true,
@@ -360,26 +253,16 @@ const changePasswordLink =
 
 });
 
-router.put('/decline/:id', async (req, res) => {
+router.put('/decline/:id', adminAuth, async (req, res) => {
 
     const { id } = req.params;
 
     try {
 
-        await db.query(
-            "UPDATE accounts SET status='Declined' WHERE account_id=?",
-            [id]
-        );
-
-        await db.query(
-            "UPDATE clients SET status='Inactive' WHERE account_id=?",
-            [id]
-        );
-
-        await db.query(
-            "UPDATE personnel SET status='Declined' WHERE account_id=?",
-            [id]
-        );
+        const result = await decideAccount(id, 'Declined');
+        if (result.outcome === 'not_found') return res.status(404).json({ success: false, message: 'Account not found.' });
+        if (result.outcome === 'not_pending') return res.status(409).json({ success: false, message: 'Account is no longer pending.' });
+        if (result.outcome !== 'updated') return res.status(400).json({ success: false, message: 'Unsupported account type.' });
 
         res.json({
             success: true
@@ -459,24 +342,25 @@ router.put('/change-password', async (req, res) => {
         const [clients] = await db.query(
             `SELECT *
              FROM clients
-             WHERE account_id = ?
-             AND password = ?`,
-            [account_id, current_password]
+             WHERE account_id = ?`,
+            [account_id]
         );
 
-        if (clients.length === 0) {
+        if (clients.length === 0 || !await passwordMatches(current_password, clients[0].password)) {
             return res.status(400).json({
                 success: false,
                 message: 'Current password is incorrect.'
             });
         }
 
+        const passwordHash = await bcrypt.hash(new_password, 10);
+
         // Update password in clients table
         await db.query(
             `UPDATE clients
              SET password = ?
              WHERE account_id = ?`,
-            [new_password, account_id]
+            [passwordHash, account_id]
         );
 
         // Update password in accounts table
@@ -484,7 +368,7 @@ router.put('/change-password', async (req, res) => {
             `UPDATE accounts
              SET password = ?
              WHERE account_id = ?`,
-            [new_password, account_id]
+            [passwordHash, account_id]
         );
 
         return res.json({
@@ -554,12 +438,14 @@ router.put('/set-password', async (req, res) => {
             });
         }
 
+        const passwordHash = await bcrypt.hash(new_password, 10);
+
         // Update client password
         await db.query(
             `UPDATE clients
              SET password = ?
              WHERE account_id = ?`,
-            [new_password, account_id]
+            [passwordHash, account_id]
         );
 
         // Update account password
@@ -567,7 +453,7 @@ router.put('/set-password', async (req, res) => {
             `UPDATE accounts
              SET password = ?
              WHERE account_id = ?`,
-            [new_password, account_id]
+            [passwordHash, account_id]
         );
 
         return res.json({

@@ -1,15 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
+const adminAuth = require('../middleware/adminAuth');
 
-router.get('/pending', async (req, res) => {
+router.get('/pending', adminAuth, async (req, res) => {
 
     try {
 
         const [accounts] = await db.query(`
             SELECT
                 account_id,
-                username,
                 account_type,
                 status
             FROM accounts
@@ -29,10 +29,7 @@ router.get('/pending', async (req, res) => {
                         account_id,
                         firstname,
                         lastname,
-                        middlename,
-                        position,
                         email,
-                        phone,
                         status
                     FROM personnel
                     WHERE account_id = ?
@@ -43,7 +40,11 @@ router.get('/pending', async (req, res) => {
                 if (personnel.length > 0) {
 
                     pendingAccounts.push({
-                        ...personnel[0],
+                        account_id: account.account_id,
+                        firstname: personnel[0].firstname,
+                        lastname: personnel[0].lastname,
+                        email: personnel[0].email,
+                        status: account.status,
                         account_type: 'Personnel'
                     });
 
@@ -57,10 +58,7 @@ router.get('/pending', async (req, res) => {
                         account_id,
                         firstname,
                         lastname,
-                        middlename,
-                        email,
-                        phone_number,
-                        status
+                        email
                     FROM clients
                     WHERE account_id = ?
                     `,
@@ -70,7 +68,11 @@ router.get('/pending', async (req, res) => {
                 if (clients.length > 0) {
 
                     pendingAccounts.push({
-                        ...clients[0],
+                        account_id: account.account_id,
+                        firstname: clients[0].firstname,
+                        lastname: clients[0].lastname,
+                        email: clients[0].email,
+                        status: account.status,
                         account_type: 'Client'
                     });
 

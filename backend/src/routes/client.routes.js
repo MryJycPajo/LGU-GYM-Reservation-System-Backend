@@ -2,7 +2,8 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const router = express.Router();
 const db = require('../config/db');
-const mailer = require('../utils/mailer');
+const bcrypt = require('bcryptjs');
+const { notifyPendingRegistration } = require('../services/accountWorkflow');
 
 
 // PERSONNEL CREATE CLIENT ACCOUNT
@@ -35,6 +36,8 @@ const {
 
     try {
 
+        const passwordHash = await bcrypt.hash(password, 10);
+
         // Generate 6 digit account ID
         const account_id = Math.floor(100000 + Math.random() * 900000)
             .toString();
@@ -54,7 +57,7 @@ const {
             [
                 account_id,
                 username,
-                password,
+                passwordHash,
                 'Client',
                 'Pending'
             ]
@@ -90,26 +93,11 @@ await db.query(
         email,
         phone,
         username,
-        password,
+        passwordHash,
         'Inactive'
     ]
 );
-        // Send pending approval email
-        await mailer.sendMail({
-            from: `"LGU Gym Reservation System" <${process.env.MAIL_USER}>`,
-            to: email,
-            subject: 'LGU Gym Reservation - Account Pending Approval',
-            html: `
-                <h2>Account Registration Successful</h2>
-                <p>Hello ${firstname},</p>
-                <p>Your LGU Gym Reservation System account has been successfully registered.</p>
-                <p><strong>Status: Pending Approval</strong></p>
-                <p>Please wait for the administrator to approve your account.</p>
-                <p>You will receive another email once your account has been approved.</p>
-                <p>Thank you!</p>
-                <p>LGU Gym Reservation System</p>
-            `
-        });
+        await notifyPendingRegistration(email, firstname);
 
         res.json({
             success: true,
